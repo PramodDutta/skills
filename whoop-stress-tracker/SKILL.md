@@ -1,6 +1,6 @@
 ---
 name: whoop-stress-tracker
-description: Find WHEN someone gets stressed from their WHOOP data - which hours and weekdays, which meetings, which days carry over into the next morning - and turn it into a measured improvement plan. Use whenever the user mentions WHOOP (or HRV / recovery / Stress Monitor data) together with stress, anxiety, burnout, "when do I get stressed", "what time am I stressed", "what stresses me", "connect my WHOOP", "analyze my WHOOP data", or wants to improve recovery/HRV. Also use to check whether a change worked ("did the breathing breaks help?"). Works with the official WHOOP API, the WHOOP app's CSV export, Stress Monitor screenshots, and minute-level heart rate (e.g. from the whoops tool or an Apple Watch/Garmin export).
+description: Find WHEN someone gets stressed from their WHOOP data - which hours and weekdays, which meetings, which days carry over into the next morning - alert them in real time while it is happening, and turn it into a measured improvement plan. Use whenever the user mentions WHOOP (or HRV / recovery / Stress Monitor data) together with stress, anxiety, burnout, "when do I get stressed", "what time am I stressed", "what stresses me", "connect my WHOOP", "analyze my WHOOP data", or wants to improve recovery/HRV, or asks for real-time / live stress alerts. Also use to check whether a change worked ("did the breathing breaks help?"). Works with the official WHOOP API, the WHOOP app's CSV export, Stress Monitor screenshots, and minute-level heart rate (e.g. from the whoops tool or an Apple Watch/Garmin export).
 metadata:
   version: "1.0"
   authors: "Built in a Claude Code session for Pramod Dutta"
@@ -19,11 +19,14 @@ experiment: one change, 14 days, re-measure.
 | WHOOP app data export (CSV, `scripts/import_export.py`) | the same daily metrics + Journal answers (alcohol, caffeine...) | no: days, nights, habits |
 | Stress Monitor readings (screenshots, transcribed to a stress log) | WHOOP's own 0-3 stress score through the day | **yes** |
 | Minute heart rate (whoops sync, Apple Watch / Garmin / Fitbit exports) | heart rate every minute | **yes**, most precise |
+| **Live: WHOOP Heart Rate Broadcast** (`scripts/live_monitor.py`) | heart rate + beat-to-beat intervals, live over Bluetooth | **yes, as it happens**, and logs it |
 | Calendar (Google Calendar connector, .ics, JSON) | what was happening | explains the windows |
 
 WHOOP's public API does not expose the Stress Monitor or daytime minute-level heart
-rate (checked September 2026). Never promise an hour-level answer from API or export
-data alone; say which days it can show and how to add the hours.
+rate (checked September 2026), and nothing in the cloud is real time. Never promise
+an hour-level answer from API or export data alone; say which days it can show and
+how to add the hours. For **real time**, the only route within WHOOP's terms is the
+strap's own Heart Rate Broadcast to a computer nearby (below).
 
 ## Workflow
 
@@ -62,6 +65,35 @@ date,start,end,level
 2026-09-14,09:45,11:30,high
 2026-09-14,11:30,16:30,0.8
 ```
+
+### Real time: live alerts while it's happening
+
+When the user wants to know **as it happens** ("real time", "alert me", "live"):
+
+1. WHOOP app -> Menu -> Device Settings -> **HR Broadcast** ON. It can switch itself
+   off after a firmware update and costs some strap battery. Heart-rate sensors
+   usually serve one receiver at a time, so disconnect Peloton/Zwift first.
+2. On the user's own computer (macOS/Windows/Linux, within Bluetooth range; a cloud
+   session has no Bluetooth): `pip install bleak`, then
+   `python3 scripts/live_monitor.py --coach [--windows out/analysis.json] [--ntfy <long-random-topic>]`.
+   On macOS the terminal app needs Bluetooth permission.
+3. The first run calibrates for 5 calm minutes. After that, every 10 s it scores stress
+   0-3 from heart rate and HRV (RMSSD from beat-to-beat intervals) against the user's
+   baseline. That's the same two signals WHOOP's Stress Monitor uses; after ~5 logged
+   hours it switches to a 14-day baseline built from the logs.
+4. It alerts when stress stays high (≥ 2 for 80% of 5 minutes), with a 30-minute
+   cooldown and quiet hours 22-7. Alerts are held while the signal looks like movement.
+   Each alert is followed by a 1-minute breathing prompt (`--coach`), and 3 minutes
+   later it reports whether heart rate and HRV came down.
+5. `--windows` adds a heads-up 10 minutes before each known stress window. `--ntfy`
+   mirrors alerts to the phone via the ntfy app; the topic name is the only protection,
+   so make it long and random.
+6. Minute logs go to `data/live/`. Feed them back with `--stress-log data/live` for the
+   weekly map and the before/after.
+
+Try it without a strap: `python3 scripts/live_monitor.py --simulate` (a sped-up
+40-minute session: calibration, a stressful call, the alert, breathing, a walk that
+must not alert).
 
 ### 2. Get the data
 
@@ -123,7 +155,8 @@ publish the report or post it anywhere without the user's explicit go-ahead.
   minutes before the window, or a buffer before the meeting that sits in it). Note
   the start date.
 - Offer (ask first, since it writes to their calendar) a daily reminder event 10
-  minutes before the window.
+  minutes before the window, or run `live_monitor.py --windows` for a live heads-up
+  plus in-the-moment alerts.
 - After 14 days, re-run with `--since-change YYYY-MM-DD`. The report adds a before/after
   section scored against the pre-change baseline. Keep what worked, then try the next item.
 - `references/improvement_playbook.md` has the interventions and how to measure each.
@@ -146,6 +179,9 @@ publish the report or post it anywhere without the user's explicit go-ahead.
 - `scripts/whoop_official.py`: official WHOOP API v2 (OAuth with rotating refresh
   tokens, paginated fetch, optional sleep heart-rate streams, `normalize` for raw v2 records).
 - `scripts/import_export.py`: WHOOP app export (zip/folder/CSV) -> normalized JSON.
+- `scripts/live_monitor.py`: real-time monitor over WHOOP Heart Rate Broadcast (Bluetooth,
+  needs `bleak`): live heart rate + HRV stress score, alerts, breathing coach, 3-minute
+  check, heads-up before known windows, minute logs; `--simulate` to try without a strap.
 - `scripts/stress_analysis.py`: daily stress index, weekday carry-over, sleep and
   night heart rate, journal effects, intraday stress map / windows / episodes,
   calendar overlap, before/after, recommendations.

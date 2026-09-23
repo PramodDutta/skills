@@ -40,7 +40,31 @@ the load of day D-1 plus that night. The report calls D-1 the **load day**.
    a minute heart-rate stream doesn't carry, so treat this as the heart-rate half of it.
 
 **Stress log input** (e.g. transcribed Stress Monitor graphs): levels are used as
-given, with low/medium/high mapped to 0.5/1.5/2.5.
+given, with low/medium/high mapped to 0.5/1.5/2.5. The live monitor's minute logs
+(`timestamp,score,motion`) are read the same way, minus the moving minutes.
+
+## Live score (`live_monitor.py`)
+
+- Input: WHOOP Heart Rate Broadcast = the standard Bluetooth Heart Rate Measurement
+  (0x2A37). Heart rate plus RR intervals in 1/1024 s units; WHOOP follows the standard,
+  as open-source WHOOP 4.0 readers also assume.
+- Every 10 s, over the last 60 s: mean heart rate, and RMSSD over clean successive
+  beats. Beats outside 300-2000 ms or more than 20% off their local median are
+  rejected, pairs across a Bluetooth gap (> 3 s) are never used, and ≥ 20 pairs are
+  needed. 60-second RMSSD tracks the standard 5-minute value closely at rest.
+- `score = clamp(mean(z_HR, z_HRV), 0, 3)`, with
+  z_HR = (HR - baseline median) / SD and
+  z_HRV = (baseline ln RMSSD - ln RMSSD) / SD.
+- Baseline: the first 5 calm minutes (SD floors: 4 bpm, 0.25 ln units). Once ≥ 300
+  logged minutes exist, it becomes the median and robust SD of the last 14 days of
+  logs (floors 3 bpm, 0.15), close to WHOOP's 14-day approach.
+- Movement (no motion sensor in the broadcast): > 25% rejected beats, heart rate ≥
+  baseline + 40, or a jump of > 25 bpm within 2 minutes. The flag persists for 3
+  minutes while heart rate stays ≥ baseline + 20. Alerts are held for 10 minutes after
+  movement, and moving minutes are logged with `motion=1` and skipped in the analysis.
+- Alert: mean score over the last 5 minutes ≥ 2.0, ≥ 80% of those evaluations ≥ 1.7,
+  and the latest ≥ 1.7. 30-minute cooldown; quiet hours 22-7. A follow-up measures
+  heart rate and HRV 3 minutes later.
 
 ## Stress windows
 

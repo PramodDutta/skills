@@ -17,6 +17,14 @@ things at once feels productive but teaches you nothing about what worked.
 | Journal habit with t ≥ 2 | Two weeks without it | - | index on those mornings |
 | Low sleep performance or sleep debt | Go to bed 30 minutes earlier on weeknights; keep wake time fixed | - | sleep performance; recovery |
 
+## In the moment (live monitor)
+
+When an alert fires and you're sitting still, do one minute of cyclic sighing right
+away. The monitor checks heart rate and HRV 3 minutes later, and the session summary
+averages those checks. That's your personal evidence for whether the technique works
+for you, alert by alert. If it keeps not working at a certain time of day, that
+window needs a structural fix (a meeting moved, a buffer, a walk), not more breathing.
+
 ## Cyclic sighing, exactly
 
 Breathe in through the nose until the lungs are nearly full, then take a second short

@@ -136,33 +136,56 @@ def load_hr(paths: list[str], tz: tzinfo) -> dict[int, float]:
 _LEVEL_WORDS = {"low": 0.5, "medium": 1.5, "med": 1.5, "moderate": 1.5, "high": 2.5, "very high": 3.0}
 
 
-def load_stress_log(path: str, tz: tzinfo) -> dict[int, float]:
-    """Intervals of stress level -> {epoch minute: score 0..3}."""
+def load_stress_log(path: str, tz: tzinfo) -> tuple[dict[int, float], str]:
+    """Stress levels -> ({epoch minute: score 0..3}, kind).
+
+    Two formats, from one CSV or a folder of them:
+      * intervals: start,end,level (+ optional date), e.g. transcribed from
+        WHOOP's Stress Monitor graphs; level 0-3 or low/medium/high
+      * minutes: timestamp,score[,motion] as written by live_monitor.py; minutes
+        flagged as movement are skipped
+    """
+    p = Path(path).expanduser()
+    files = sorted(p.glob("*.csv")) if p.is_dir() else [p]
+    if not files:
+        raise SystemExit(f"no CSV files in {p}")
     scores: dict[int, float] = {}
-    with Path(path).expanduser().open(newline="", encoding="utf-8-sig") as fh:
-        reader = csv.DictReader(fh)
-        cols = {c.strip().lower(): c for c in reader.fieldnames or []}
-        need = ("start", "end")
-        if not all(c in cols for c in need) or not ({"level", "score", "stress"} & cols.keys()):
-            raise SystemExit(f"{path}: expected columns start,end,level (optional date); got {reader.fieldnames}")
-        lcol = cols.get("level") or cols.get("score") or cols.get("stress")
-        for row in reader:
-            day = (row.get(cols["date"]) or "").strip() if "date" in cols else ""
-            s_raw, e_raw = row[cols["start"]].strip(), row[cols["end"]].strip()
-            if day and len(s_raw) <= 5:
-                s_raw, e_raw = f"{day} {s_raw}", f"{day} {e_raw}"
-            start, end = parse_ts(s_raw, tz), parse_ts(e_raw, tz)
-            if not start or not end:
+    kinds = set()
+    for f in files:
+        with f.open(newline="", encoding="utf-8-sig") as fh:
+            reader = csv.DictReader(fh)
+            cols = {c.strip().lower(): c for c in reader.fieldnames or []}
+            if "timestamp" in cols and "score" in cols:
+                kinds.add("live")
+                mcol = cols.get("motion")
+                for row in reader:
+                    if mcol and (row.get(mcol) or "0").strip() not in ("0", ""):
+                        continue
+                    dt, sc = parse_ts(row.get(cols["timestamp"]), tz), to_float(row.get(cols["score"]))
+                    if dt and sc is not None:
+                        scores[epoch_minute(dt)] = clamp(sc, 0.0, 3.0)
                 continue
-            if end <= start:
-                end += timedelta(days=1)
-            lv_raw = (row.get(lcol) or "").strip().lower()
-            level = _LEVEL_WORDS.get(lv_raw, to_float(lv_raw))
-            if level is None:
-                continue
-            for m in range(epoch_minute(start), epoch_minute(end)):
-                scores[m] = clamp(level, 0.0, 3.0)
-    return scores
+            if not all(c in cols for c in ("start", "end")) or not ({"level", "score", "stress"} & cols.keys()):
+                raise SystemExit(f"{f}: expected start,end,level (optional date) or timestamp,score; got {reader.fieldnames}")
+            kinds.add("log")
+            lcol = cols.get("level") or cols.get("score") or cols.get("stress")
+            for row in reader:
+                day = (row.get(cols["date"]) or "").strip() if "date" in cols else ""
+                s_raw, e_raw = row[cols["start"]].strip(), row[cols["end"]].strip()
+                if day and len(s_raw) <= 5:
+                    s_raw, e_raw = f"{day} {s_raw}", f"{day} {e_raw}"
+                start, end = parse_ts(s_raw, tz), parse_ts(e_raw, tz)
+                if not start or not end:
+                    continue
+                if end <= start:
+                    end += timedelta(days=1)
+                lv_raw = (row.get(lcol) or "").strip().lower()
+                level = _LEVEL_WORDS.get(lv_raw, to_float(lv_raw))
+                if level is None:
+                    continue
+                for m in range(epoch_minute(start), epoch_minute(end)):
+                    scores[m] = clamp(level, 0.0, 3.0)
+    return scores, ("live" if kinds == {"live"} else "log")
 
 
 def load_calendar(path: Optional[str], tz: tzinfo) -> list[Event]:
@@ -1315,10 +1338,14 @@ def run(args: argparse.Namespace) -> dict:
     if args.stress_log:
         if args.hr:
             notes.append("--stress-log given, so --hr was ignored for timing.")
-        scores = load_stress_log(args.stress_log, tz)
+        scores, kind = load_stress_log(args.stress_log, tz)
         absolute = True
-        res["sources"]["stress_log"] = {"minutes": len(scores)}
-        res["intraday_method"] = "stress levels you logged (e.g. WHOOP Stress Monitor)"
+        res["sources"]["stress_log"] = {"minutes": len(scores), "kind": kind}
+        res["intraday_method"] = (
+            "live heart rate and HRV vs your baseline (live_monitor)"
+            if kind == "live"
+            else "stress levels you logged (e.g. WHOOP Stress Monitor)"
+        )
     elif args.hr:
         hr = load_hr(args.hr, tz)
         if args.start or args.end:
@@ -1367,6 +1394,11 @@ def run(args: argparse.Namespace) -> dict:
             (res.get("timing") or {}).get("windows", []),
         )
     if not days and not scores:
+        if args.hr or args.stress_log:
+            raise SystemExit(
+                "not enough intraday data yet: need at least 4 awake hours (a few days is better) "
+                "to compare against your own baseline"
+            )
         raise SystemExit("nothing to analyze: pass --whoop, --hr or --stress-log (or --demo)")
     res["recommendations"] = recommendations(res)
     res["headline"] = headline(res)
