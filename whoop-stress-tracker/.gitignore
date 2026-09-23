@@ -1,0 +1,7 @@
+# personal health data, calendar exports and generated reports stay local
+data/
+out/
+*.token.json
+oauth_state.json
+__pycache__/
+*.pyc
