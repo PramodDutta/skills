@@ -1,0 +1,7 @@
+# LangGraph for QA - tested with Python 3.11 and the versions below
+langgraph>=1.2.12,<2
+langchain>=1.4.3,<2
+langchain-core>=1.6.6,<2
+langchain-anthropic>=1.7.5,<2
+requests>=2.31
+pytest>=8
